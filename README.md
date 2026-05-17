@@ -1,4 +1,4 @@
-# intan-reader
+# RHD_analysis
 
 A Python library for reading and processing Intan Technologies RHD2000 electrophysiology data, with specialized support for cardiac MEA (multi-electrode array) recordings.
 
@@ -186,6 +186,26 @@ from intan_reader.processing import (
     plot_qt_detection,
 )
 ```
+## Acknowledgements
+
+This package is based on the original Intan RHD2000 reading scripts:
+
+- Original implementation by Michael Gibson (17 July 2015)
+- Modified by Adrian Foy (Sep 2018)
+- Copyright © 2015-2018 Intan Technologies LLC
+
+The original scripts can be found at the [Intan Technologies website](http://intantech.com/downloads.html).
+
+## Contributing
+
+Contributions to the project are very welcome! Please feel free to submit pull requests, create issues, or suggest improvements. For major changes, please open an issue first to discuss what you would like to change.
+
+
+## Contact
+
+Leonardo Garma - leonardo.garma@gmail.com
+
+Project Link: [https://github.com/leo-gg/RHD_analysis](https://github.com/leo-gg/RHD_analysis)
 
 ## License
 
