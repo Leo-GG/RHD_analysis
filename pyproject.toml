@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "intan-reader"
+version = "1.0.0"
+description = "Python library for reading and processing Intan Technologies RHD2000 electrophysiology data"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+dependencies = [
+    "numpy>=1.22",
+    "scipy>=1.9",
+    "diptest>=0.7",
+]
+
+[project.optional-dependencies]
+plot = ["matplotlib>=3.5"]
+gui = ["dearpygui>=1.9"]
+web = ["streamlit>=1.30", "matplotlib>=3.5"]
+all = ["matplotlib>=3.5", "dearpygui>=1.9", "streamlit>=1.30"]
+dev = ["matplotlib>=3.5", "dearpygui>=1.9", "streamlit>=1.30", "pytest>=7.0"]
+
+[project.scripts]
+intan-gui = "intan_reader.gui.app:main"
+
+[tool.setuptools.packages.find]
+include = ["intan_reader*"]
