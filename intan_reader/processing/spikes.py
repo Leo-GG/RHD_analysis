@@ -162,6 +162,7 @@ def get_peaks(
     artifacts: List[np.ndarray],
     *,
     threshold_std: float = 3.5,
+    min_distance: int = 10000,
     min_amplitude_uv: float = 50.0,
     max_amplitude_uv: float = 500.0,
     max_z_score: float = 2.0,
@@ -176,6 +177,9 @@ def get_peaks(
         Per-channel boolean artifact masks.
     threshold_std : float, optional
         Detection threshold (std multiples).
+    min_distance : int, optional
+        Minimum distance between two peaks in samples. Default is 5000
+        (250 ms at 20 kS/s).
     min_amplitude_uv : float, optional
         Minimum peak amplitude in µV.
     max_amplitude_uv : float, optional
@@ -190,7 +194,7 @@ def get_peaks(
     filtered_peaks : dict[int, np.ndarray]
         Peaks after filtering.
     """
-    raw = detect_peaks(amplifier_data, artifacts, threshold_std=threshold_std)
+    raw = detect_peaks(amplifier_data, artifacts, threshold_std=threshold_std, min_distance=min_distance)
     filt = filter_peaks(
         amplifier_data,
         raw,

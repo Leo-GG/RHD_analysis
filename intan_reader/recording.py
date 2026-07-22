@@ -437,6 +437,7 @@ class Recording:
         self,
         *,
         threshold: float = 3.5,
+        min_distance: int = 10000,
         min_amplitude_uv: float = 50.0,
         max_amplitude_uv: float = 500.0,
         max_z_score: float = 2.0,
@@ -450,6 +451,9 @@ class Recording:
         ----------
         threshold : float
             Detection threshold in multiples of channel std.
+        min_distance : int
+            Minimum distance between two peaks in samples. Default is 10000
+            (500 ms at 20 kS/s).
         min_amplitude_uv : float
             Minimum peak amplitude in µV to keep.
         max_amplitude_uv : float
@@ -471,6 +475,7 @@ class Recording:
             self.amplifier_data,
             self.artifacts,
             threshold_std=threshold,
+            min_distance=min_distance,
             min_amplitude_uv=min_amplitude_uv,
             max_amplitude_uv=max_amplitude_uv,
             max_z_score=max_z_score,
