@@ -9,6 +9,7 @@ A Python library for reading and processing Intan Technologies RHD2000 electroph
 - **Signal filtering** — zero-phase notch, high-pass, low-pass, and band-pass (Butterworth via SciPy)
 - **Artifact detection** — envelope-based or threshold-based, per channel
 - **Noise detection** — identify noisy channels using Hartigan's dip test
+- **Channel QC** — automatic exclusion of noisy and poor-quality channels
 - **Spike detection** — negative-going peak detection with amplitude and waveform-shape filtering
 - **Waveform extraction** — cut and average spike snippets
 - **Spike statistics** — per-channel amplitude, frequency, ISI, and waveform stability metrics
@@ -76,20 +77,29 @@ raw_peaks, filtered_peaks = rec.detect_spikes(threshold=3.5)
 waveforms, averages = rec.extract_waveforms(filtered_peaks)
 ```
 
-### Detect noisy channels
+### Channel QC workflow
 
 ```python
-noise_result = rec.detect_noisy_channels(dip_threshold=0.05)
-noisy_channels = [i for i, is_noisy in enumerate(noise_result["is_noisy"]) if is_noisy]
+# 1. Detect noisy channels (stores in rec.noisy_channels)
+rec.detect_noisy_channels(dip_threshold=0.05)
+
+# 2. Compute stats on ALL channels for QC input
+all_stats = rec.compute_spike_statistics(filtered_peaks, use_excluded=False)
+
+# 3. Run spike quality QC (stores in rec.bad_qc_channels)
+rec.run_spike_qc(all_stats, max_amp_std=50, max_wf_dev_mean=50)
+
+# 4. Check excluded channels
+print(f"Noisy: {rec.noisy_channels}")
+print(f"Bad QC: {rec.bad_qc_channels}")
+print(f"All excluded: {rec.excluded_channels}")
 ```
 
 ### Compute spike statistics
 
 ```python
-stats_df = rec.compute_spike_statistics(
-    filtered_peaks,
-    exclude_channels=noisy_channels
-)
+# Automatically excludes noisy + bad QC channels by default
+stats_df = rec.compute_spike_statistics(filtered_peaks)
 print(stats_df)
 # Returns DataFrame with: n_spikes, freq_hz, amp_min/max/mean/median/std,
 # isi_min/max/mean/median/std_ms, wf_dev_min/max/mean/median
@@ -98,9 +108,9 @@ print(stats_df)
 ### Cardiac QT interval analysis
 
 ```python
+# Automatically excludes noisy + bad QC channels by default
 qt_df = rec.compute_qt_intervals(
     filtered_peaks,
-    exclude_channels=noisy_channels,
     t_search_start_ms=50,
     t_search_end_ms=500,
 )
@@ -155,8 +165,8 @@ intan_reader/
 
 ### Recording class
 
-| Method | Description |
-|--------|-------------|
+| Method / Property | Description |
+|-------------------|-------------|
 | `from_file(path)` | Load a single RHD file |
 | `from_folder(folder, pattern)` | Load and merge files matching pattern |
 | `apply_notch(freq)` | Apply notch filter |
@@ -164,12 +174,16 @@ intan_reader/
 | `apply_bandpass(low, high)` | Apply band-pass filter |
 | `detect_artifacts(method, ...)` | Detect artifact regions |
 | `detect_noisy_channels(...)` | Identify noisy channels via dip test |
+| `run_spike_qc(stats, ...)` | Flag channels with poor spike quality |
 | `detect_spikes(threshold, ...)` | Detect spike peaks |
 | `extract_waveforms(peaks, ...)` | Extract waveform snippets |
 | `compute_spike_statistics(...)` | Compute per-channel spike metrics |
 | `compute_qt_intervals(...)` | Compute QT intervals (cardiac) |
 | `plot_channels(...)` | Plot channel overview |
 | `plot_waveforms(...)` | Plot spike waveforms |
+| `noisy_channels` | Channels flagged by `detect_noisy_channels()` |
+| `bad_qc_channels` | Channels flagged by `run_spike_qc()` |
+| `excluded_channels` | Union of noisy + bad QC channels |
 
 ### Processing functions
 

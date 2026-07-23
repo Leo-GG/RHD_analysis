@@ -494,7 +494,7 @@ class Recording:
             if amp_std > max_amp_std or wf_dev > max_wf_dev_mean:
                 bad.append(ch)
         self._bad_qc_channels = bad
-        return bad
+        return None
 
     # ------------------------------------------------------------------
     # Spike detection
