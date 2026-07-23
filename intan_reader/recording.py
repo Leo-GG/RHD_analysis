@@ -89,6 +89,8 @@ class Recording:
         """Additional metadata from the RHD file (header, frequency params, etc.)."""
 
         self._artifacts: Optional[List[np.ndarray]] = None
+        self._noisy_channels: List[int] = []
+        self._bad_qc_channels: List[int] = []
 
     # ------------------------------------------------------------------
     # Properties
@@ -125,6 +127,21 @@ class Recording:
         if self._artifacts is None:
             return _no_artifacts(self.amplifier_data)
         return self._artifacts
+
+    @property
+    def noisy_channels(self) -> List[int]:
+        """Channels flagged as noisy by :meth:`detect_noisy_channels`."""
+        return self._noisy_channels
+
+    @property
+    def bad_qc_channels(self) -> List[int]:
+        """Channels flagged by :meth:`run_spike_qc` due to poor spike quality."""
+        return self._bad_qc_channels
+
+    @property
+    def excluded_channels(self) -> List[int]:
+        """Union of noisy and bad QC channels."""
+        return sorted(set(self._noisy_channels) | set(self._bad_qc_channels))
 
     # ------------------------------------------------------------------
     # Factory class methods
@@ -423,11 +440,61 @@ class Recording:
             - **is_noisy** : bool array, True for noisy channels
             - **dip_values** : dip statistic per channel
             - **dip_p_values** : dip test p-value per channel
+
+        Notes
+        -----
+        Detected noisy channels are stored in :attr:`noisy_channels` and
+        included in :attr:`excluded_channels`.
         """
-        return _detect_noisy_channels(
+        result = _detect_noisy_channels(
             self.amplifier_data,
             dip_threshold=dip_threshold,
         )
+        self._noisy_channels = [
+            ch for ch, is_noisy in enumerate(result["is_noisy"]) if is_noisy
+        ]
+        return None
+
+    def run_spike_qc(
+        self,
+        spike_stats: "Any",
+        *,
+        max_amp_std: float = 50.0,
+        max_wf_dev_mean: float = 50.0,
+    ) -> List[int]:
+        """Flag channels with poor spike quality.
+
+        Channels are flagged if their spike amplitude standard deviation
+        or mean waveform deviation exceed the specified thresholds.
+
+        Parameters
+        ----------
+        spike_stats : pd.DataFrame
+            Spike statistics from :meth:`compute_spike_statistics`.
+        max_amp_std : float, optional
+            Maximum allowed amplitude std (µV). Default 50.
+        max_wf_dev_mean : float, optional
+            Maximum allowed mean waveform deviation. Default 50.
+
+        Returns
+        -------
+        list of int
+            Channels flagged as bad QC.
+
+        Notes
+        -----
+        Flagged channels are stored in :attr:`bad_qc_channels` and
+        included in :attr:`excluded_channels`.
+        """
+        bad = []
+        for _, row in spike_stats.iterrows():
+            ch = int(row["channel"])
+            amp_std = row.get("amp_std", 0.0)
+            wf_dev = row.get("wf_dev_mean", 0.0)
+            if amp_std > max_amp_std or wf_dev > max_wf_dev_mean:
+                bad.append(ch)
+        self._bad_qc_channels = bad
+        return bad
 
     # ------------------------------------------------------------------
     # Spike detection
@@ -487,6 +554,7 @@ class Recording:
         *,
         half_width: int = 5000,
         exclude_channels: Optional[List[int]] = None,
+        use_excluded: bool = True,
     ) -> Tuple[Dict[int, List[np.ndarray]], Dict[int, np.ndarray]]:
         """Extract waveform snippets around detected peaks.
 
@@ -497,14 +565,19 @@ class Recording:
         half_width : int
             Number of samples on each side of the peak.
         exclude_channels : list of int, optional
-            Channels to exclude (e.g., noisy channels from
-            :meth:`detect_noisy_channels`).
+            Channels to exclude. If ``None`` and *use_excluded* is True,
+            defaults to :attr:`excluded_channels`.
+        use_excluded : bool, optional
+            If True (default) and *exclude_channels* is None, automatically
+            exclude channels in :attr:`excluded_channels`.
 
         Returns
         -------
         waveforms : dict[int, list of np.ndarray]
         average_waveforms : dict[int, np.ndarray]
         """
+        if exclude_channels is None and use_excluded:
+            exclude_channels = self.excluded_channels or None
         if exclude_channels is not None:
             exclude_set = set(exclude_channels)
             peaks = {ch: p for ch, p in peaks.items() if ch not in exclude_set}
@@ -519,6 +592,7 @@ class Recording:
         *,
         half_width: int = 5000,
         exclude_channels: Optional[List[int]] = None,
+        use_excluded: bool = True,
     ) -> Any:
         """Compute per-channel spike statistics.
 
@@ -531,8 +605,11 @@ class Recording:
         half_width : int
             Waveform half-width in samples for amplitude extraction.
         exclude_channels : list of int, optional
-            Channels to exclude (e.g., noisy channels from
-            :meth:`detect_noisy_channels`).
+            Channels to exclude. If ``None`` and *use_excluded* is True,
+            defaults to :attr:`excluded_channels`.
+        use_excluded : bool, optional
+            If True (default) and *exclude_channels* is None, automatically
+            exclude channels in :attr:`excluded_channels`.
 
         Returns
         -------
@@ -545,8 +622,10 @@ class Recording:
             - **amp_min/max/mean/median/std** : peak amplitude stats (µV)
             - **isi_min/max/mean/median/std_ms** : inter-spike interval stats (ms)
         """
+        if exclude_channels is None and use_excluded:
+            exclude_channels = self.excluded_channels or None
         waves, _ = self.extract_waveforms(
-            peaks, half_width=half_width, exclude_channels=exclude_channels
+            peaks, half_width=half_width, exclude_channels=exclude_channels, use_excluded=False
         )
         return _compute_spike_statistics(
             waves,
@@ -561,6 +640,7 @@ class Recording:
         *,
         half_width: int = 5000,
         exclude_channels: Optional[List[int]] = None,
+        use_excluded: bool = True,
         t_search_start_ms: float = 50.0,
         t_search_end_ms: float = 500.0,
         derivative_threshold: float = 0.1,
@@ -582,7 +662,11 @@ class Recording:
         half_width : int
             Waveform half-width in samples for extraction.
         exclude_channels : list of int, optional
-            Channels to exclude (e.g., noisy channels).
+            Channels to exclude. If ``None`` and *use_excluded* is True,
+            defaults to :attr:`excluded_channels`.
+        use_excluded : bool, optional
+            If True (default) and *exclude_channels* is None, automatically
+            exclude channels in :attr:`excluded_channels`.
         t_search_start_ms : float, optional
             Start searching for T-end this many ms after Q. Default 50 ms.
         t_search_end_ms : float, optional
@@ -607,8 +691,10 @@ class Recording:
             - **qt_gauss_min/max/mean/median/std_ms** : Gaussian fit method stats
             - **qt_avg_min/max/mean/median/std_ms** : average of all methods
         """
+        if exclude_channels is None and use_excluded:
+            exclude_channels = self.excluded_channels or None
         waves, _ = self.extract_waveforms(
-            peaks, half_width=half_width, exclude_channels=exclude_channels
+            peaks, half_width=half_width, exclude_channels=exclude_channels, use_excluded=False
         )
         return _compute_qt_intervals(
             waves,
@@ -652,6 +738,7 @@ class Recording:
         half_width: int = 5000,
         channels: Optional[List[int]] = None,
         exclude_channels: Optional[List[int]] = None,
+        use_excluded: bool = True,
         **kwargs,
     ) -> Any:
         """Extract and plot spike waveforms.
@@ -665,8 +752,11 @@ class Recording:
         channels : list of int, optional
             Channels to plot. ``None`` → all channels with spikes.
         exclude_channels : list of int, optional
-            Channels to exclude from plotting (e.g., noisy channels from
-            :meth:`detect_noisy_channels`).
+            Channels to exclude. If ``None`` and *use_excluded* is True,
+            defaults to :attr:`excluded_channels`.
+        use_excluded : bool, optional
+            If True (default) and *exclude_channels* is None, automatically
+            exclude channels in :attr:`excluded_channels`.
 
         Returns
         -------
@@ -674,6 +764,8 @@ class Recording:
         """
         from intan_reader.visualization import plot_waveforms
 
+        if exclude_channels is None and use_excluded:
+            exclude_channels = self.excluded_channels or None
         waves, avg = self.extract_waveforms(peaks, half_width=half_width)
         kwargs.setdefault("sample_rate", self.sample_rate)
         return plot_waveforms(
