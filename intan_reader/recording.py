@@ -461,11 +461,15 @@ class Recording:
         *,
         max_amp_std: float = 50.0,
         max_wf_dev_mean: float = 50.0,
-    ) -> List[int]:
+        min_freq_hz: float = 0.1,
+        max_isi_ms: float = 3000.0,
+        min_spikes: int = 5,
+    ) -> None:
         """Flag channels with poor spike quality.
 
         Channels are flagged if their spike amplitude standard deviation
-        or mean waveform deviation exceed the specified thresholds.
+        or mean waveform deviation exceed the specified thresholds, or if
+        their spike frequency is too low or ISI too high.
 
         Parameters
         ----------
@@ -475,11 +479,19 @@ class Recording:
             Maximum allowed amplitude std (µV). Default 50.
         max_wf_dev_mean : float, optional
             Maximum allowed mean waveform deviation. Default 50.
+        min_freq_hz : float, optional
+            Minimum spike frequency (Hz). Channels below this are flagged.
+            Default 0.1.
+        max_isi_ms : float, optional
+            Maximum allowed ISI (ms). Channels with isi_max above this are
+            flagged. Default 3000.
+        min_spikes : int, optional
+            Minimum number of spikes. Channels with fewer are flagged.
+            Default 5.
 
         Returns
         -------
-        list of int
-            Channels flagged as bad QC.
+        None
 
         Notes
         -----
@@ -491,7 +503,16 @@ class Recording:
             ch = int(row["channel"])
             amp_std = row.get("amp_std", 0.0)
             wf_dev = row.get("wf_dev_mean", 0.0)
-            if amp_std > max_amp_std or wf_dev > max_wf_dev_mean:
+            freq_hz = row.get("freq_hz", 0.0)
+            isi_max = row.get("isi_max_ms", 0.0)
+            n_spikes = row.get("n_spikes", 0)
+            if (
+                amp_std > max_amp_std
+                or wf_dev > max_wf_dev_mean
+                or freq_hz < min_freq_hz
+                or isi_max < max_isi_ms
+                or n_spikes < min_spikes
+            ):
                 bad.append(ch)
         self._bad_qc_channels = bad
         return None

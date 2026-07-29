@@ -87,7 +87,14 @@ rec.detect_noisy_channels(dip_threshold=0.05)
 all_stats = rec.compute_spike_statistics(filtered_peaks, use_excluded=False)
 
 # 3. Run spike quality QC (stores in rec.bad_qc_channels)
-rec.run_spike_qc(all_stats, max_amp_std=50, max_wf_dev_mean=50)
+rec.run_spike_qc(
+    all_stats,
+    max_amp_std=50,
+    max_wf_dev_mean=50,
+    min_freq_hz=0.1,
+    max_isi_ms=3000,
+    min_spikes=5,
+)
 
 # 4. Check excluded channels
 print(f"Noisy: {rec.noisy_channels}")

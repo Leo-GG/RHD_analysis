@@ -62,8 +62,10 @@ def detect_artifacts(
         envelope = uniform_filter1d(
             np.abs(amplifier_data[ch, :]), window_samples, mode="reflect"
         )
+        ch_std = np.std(amplifier_data[ch,:])
+
         #threshold = np.std(envelope) * n_std
-        artifacts.append(envelope > threshold_uv)
+        artifacts.append(envelope > np.mean(envelope)+np.std(envelope)*threshold_uv)
 
     return artifacts
 
