@@ -41,7 +41,10 @@ pip install -e ".[all]"
 ```python
 from intan_reader import Recording
 
-rec = Recording.from_file("data/experiment_001.rhd")
+rec = Recording.from_file(
+    "data/experiment_001.rhd",
+    disconnected_channels=[0, 7, 56, 63],  # channels known to be disconnected
+)
 print(rec)
 # Recording(channels=64, samples=1200000, duration=60.00s, sample_rate=20000 Hz)
 ```
@@ -188,9 +191,10 @@ intan_reader/
 | `compute_qt_intervals(...)` | Compute QT intervals (cardiac) |
 | `plot_channels(...)` | Plot channel overview |
 | `plot_waveforms(...)` | Plot spike waveforms |
+| `disconnected_channels` | Channels known to be disconnected (user-provided) |
 | `noisy_channels` | Channels flagged by `detect_noisy_channels()` |
 | `bad_qc_channels` | Channels flagged by `run_spike_qc()` |
-| `excluded_channels` | Union of noisy + bad QC channels |
+| `excluded_channels` | Union of disconnected + noisy + bad QC channels |
 
 ### Processing functions
 

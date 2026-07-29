@@ -78,6 +78,7 @@ class Recording:
         amplifier_data: np.ndarray,
         sample_rate: float,
         metadata: Optional[Dict[str, Any]] = None,
+        disconnected_channels: Optional[List[int]] = None,
     ) -> None:
         self.amplifier_data: np.ndarray = amplifier_data
         """Amplifier data array — shape ``(n_channels, n_samples)``, units µV."""
@@ -91,6 +92,7 @@ class Recording:
         self._artifacts: Optional[List[np.ndarray]] = None
         self._noisy_channels: List[int] = []
         self._bad_qc_channels: List[int] = []
+        self._disconnected_channels: List[int] = disconnected_channels or []
 
     # ------------------------------------------------------------------
     # Properties
@@ -139,9 +141,18 @@ class Recording:
         return self._bad_qc_channels
 
     @property
+    def disconnected_channels(self) -> List[int]:
+        """Channels known to be disconnected (user-provided)."""
+        return self._disconnected_channels
+
+    @property
     def excluded_channels(self) -> List[int]:
-        """Union of noisy and bad QC channels."""
-        return sorted(set(self._noisy_channels) | set(self._bad_qc_channels))
+        """Union of disconnected, noisy, and bad QC channels."""
+        return sorted(
+            set(self._disconnected_channels)
+            | set(self._noisy_channels)
+            | set(self._bad_qc_channels)
+        )
 
     # ------------------------------------------------------------------
     # Factory class methods
@@ -157,6 +168,7 @@ class Recording:
         highpass_cutoff: Optional[float] = None,
         lowpass_cutoff: Optional[float] = None,
         sample_rate_override: Optional[float] = None,
+        disconnected_channels: Optional[List[int]] = None,
     ) -> "Recording":
         """Load a single RHD file.
 
@@ -178,6 +190,9 @@ class Recording:
             Override the sample rate from the file header (Hz). Use when
             the recording was made at a rate different from what the
             header reports (e.g. 10 000 vs 20 000).
+        disconnected_channels : list of int, optional
+            Channel indices known to be disconnected. These are added to
+            :attr:`excluded_channels` automatically.
 
         Returns
         -------
@@ -195,6 +210,7 @@ class Recording:
             amplifier_data=result["amplifier_data"],
             sample_rate=result["sample_rate"],
             metadata=result,
+            disconnected_channels=disconnected_channels,
         )
 
     @classmethod
@@ -209,6 +225,7 @@ class Recording:
         highpass_cutoff: Optional[float] = None,
         lowpass_cutoff: Optional[float] = None,
         sample_rate_override: Optional[float] = None,
+        disconnected_channels: Optional[List[int]] = None,
     ) -> "Recording":
         """Load and merge multiple RHD files from a folder.
 
@@ -236,6 +253,9 @@ class Recording:
             Low-pass filter cutoff in Hz. Applied per file before merging.
         sample_rate_override : float or None, optional
             Override the sample rate from the file header (Hz).
+        disconnected_channels : list of int, optional
+            Channel indices known to be disconnected. These are added to
+            :attr:`excluded_channels` automatically.
 
         Returns
         -------
@@ -288,6 +308,7 @@ class Recording:
             amplifier_data=merged_data,
             sample_rate=last_result["sample_rate"],
             metadata=last_result,
+            disconnected_channels=disconnected_channels,
         )
 
     # ------------------------------------------------------------------
