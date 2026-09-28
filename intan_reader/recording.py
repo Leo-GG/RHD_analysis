@@ -94,6 +94,11 @@ class Recording:
         self._bad_qc_channels: List[int] = []
         self._disconnected_channels: List[int] = disconnected_channels or []
 
+        self._noisy_reasons: Dict[int, List[str]] = {}
+        self._bad_qc_reasons: Dict[int, List[str]] = {}
+        self._noise_metrics: Optional[Dict[str, np.ndarray]] = None
+        self._spike_qc_stats: Optional[Any] = None
+
     # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
@@ -153,6 +158,23 @@ class Recording:
             | set(self._noisy_channels)
             | set(self._bad_qc_channels)
         )
+
+    @property
+    def exclusion_reasons(self) -> Dict[int, List[str]]:
+        """Why each excluded channel was discarded, keyed by channel index.
+
+        Each value is a list of human-readable reason strings including the
+        offending metric value and the threshold it violated, e.g.
+        ``{3: ["noise-only: dip test p=0.412 > 0.05"]}``.
+        """
+        reasons: Dict[int, List[str]] = {}
+        for ch in self._disconnected_channels:
+            reasons.setdefault(int(ch), []).append("disconnected (user-specified)")
+        for ch, why in self._noisy_reasons.items():
+            reasons.setdefault(int(ch), []).extend(why)
+        for ch, why in self._bad_qc_reasons.items():
+            reasons.setdefault(int(ch), []).extend(why)
+        return dict(sorted(reasons.items()))
 
     # ------------------------------------------------------------------
     # Factory class methods
@@ -471,10 +493,20 @@ class Recording:
             self.amplifier_data,
             dip_threshold=dip_threshold,
         )
+        self._noise_metrics = result
         self._noisy_channels = [
             ch for ch, is_noisy in enumerate(result["is_noisy"]) if is_noisy
         ]
-        return None
+        self._noisy_reasons = {
+            ch: [
+                f"noise-only: dip test p={result['dip_p_values'][ch]:.4g} > "
+                f"{dip_threshold:g} (unimodal amplitude distribution)"
+            ]
+            for ch in self._noisy_channels
+        }
+        for ch in self._noisy_channels:
+            logger.info("Channel %d flagged noisy — %s", ch, self._noisy_reasons[ch][0])
+        return result
 
     def run_spike_qc(
         self,
@@ -483,7 +515,7 @@ class Recording:
         max_amp_std: float = 50.0,
         max_wf_dev_mean: float = 50.0,
         min_freq_hz: float = 0.1,
-        max_isi_ms: float = 3000.0,
+        max_mean_isi: float = 1000.0,
         min_spikes: int = 5,
     ) -> None:
         """Flag channels with poor spike quality.
@@ -503,9 +535,9 @@ class Recording:
         min_freq_hz : float, optional
             Minimum spike frequency (Hz). Channels below this are flagged.
             Default 0.1.
-        max_isi_ms : float, optional
-            Maximum allowed ISI (ms). Channels with isi_max above this are
-            flagged. Default 3000.
+        max_mean_isi : float, optional
+            Maximum allowed mean ISI (ms). Channels with mean_isi above this are
+            flagged. Default 1000.
         min_spikes : int, optional
             Minimum number of spikes. Channels with fewer are flagged.
             Default 5.
@@ -519,24 +551,106 @@ class Recording:
         Flagged channels are stored in :attr:`bad_qc_channels` and
         included in :attr:`excluded_channels`.
         """
-        bad = []
+        self._spike_qc_stats = spike_stats
+        self._bad_qc_reasons = {}
         for _, row in spike_stats.iterrows():
             ch = int(row["channel"])
-            amp_std = row.get("amp_std", 0.0)
-            wf_dev = row.get("wf_dev_mean", 0.0)
-            freq_hz = row.get("freq_hz", 0.0)
-            isi_max = row.get("isi_max_ms", 0.0)
-            n_spikes = row.get("n_spikes", 0)
-            if (
-                amp_std > max_amp_std
-                or wf_dev > max_wf_dev_mean
-                or freq_hz < min_freq_hz
-                or isi_max < max_isi_ms
-                or n_spikes < min_spikes
-            ):
-                bad.append(ch)
-        self._bad_qc_channels = bad
+            checks = [
+                ("amp_std", row.get("amp_std", 0.0), ">", max_amp_std),
+                ("wf_dev_mean", row.get("wf_dev_mean", 0.0), ">", max_wf_dev_mean),
+                ("freq_hz", row.get("freq_hz", 0.0), "<", min_freq_hz),
+                ("isi_mean_ms", row.get("isi_mean_ms", 0.0), ">", max_mean_isi),
+                ("n_spikes", row.get("n_spikes", 0), "<", min_spikes),
+            ]
+            why = [
+                f"{name}={value:.4g} {op} {limit:g}"
+                for name, value, op, limit in checks
+                if (value > limit if op == ">" else value < limit)
+            ]
+            if why:
+                self._bad_qc_reasons[ch] = why
+                logger.info("Channel %d failed spike QC — %s", ch, "; ".join(why))
+        self._bad_qc_channels = sorted(self._bad_qc_reasons)
+        logger.info(
+            "Spike QC: %d/%d channels flagged",
+            len(self._bad_qc_channels),
+            len(spike_stats),
+        )
         return None
+
+    # ------------------------------------------------------------------
+    # Channel exclusion reporting
+    # ------------------------------------------------------------------
+
+    def channel_report(self) -> Any:
+        """Per-channel table of exclusion status, reasons, and QC metrics.
+
+        One row per channel, so kept and discarded channels can be compared
+        side by side.
+
+        Returns
+        -------
+        pd.DataFrame
+            Columns: **channel**, **status** (``"kept"``, ``"disconnected"``,
+            ``"noisy"``, ``"bad_qc"``, or a combination), **reasons**
+            (semicolon-joined), **dip_p_value**, plus the spike QC metrics
+            (``n_spikes``, ``freq_hz``, ``amp_std``, ``wf_dev_mean``,
+            ``isi_max_ms``) when :meth:`run_spike_qc` has been run.
+
+        Notes
+        -----
+        Channels excluded before :meth:`compute_spike_statistics` ran have no
+        spike metrics (``NaN``), since they were never evaluated.
+        """
+        import pandas as pd
+
+        reasons = self.exclusion_reasons
+        disconnected = set(int(c) for c in self._disconnected_channels)
+        noisy = set(self._noisy_channels)
+        bad_qc = set(self._bad_qc_channels)
+
+        metrics: Dict[int, Dict[str, float]] = {}
+        if self._spike_qc_stats is not None:
+            cols = ["n_spikes", "freq_hz", "amp_std", "wf_dev_mean", "isi_max_ms"]
+            available = [c for c in cols if c in self._spike_qc_stats.columns]
+            for _, row in self._spike_qc_stats.iterrows():
+                metrics[int(row["channel"])] = {c: row[c] for c in available}
+
+        rows = []
+        for ch in range(self.num_channels):
+            tags = [
+                tag
+                for tag, members in (
+                    ("disconnected", disconnected),
+                    ("noisy", noisy),
+                    ("bad_qc", bad_qc),
+                )
+                if ch in members
+            ]
+            row = {
+                "channel": ch,
+                "status": "+".join(tags) if tags else "kept",
+                "reasons": "; ".join(reasons.get(ch, [])),
+                "dip_p_value": (
+                    self._noise_metrics["dip_p_values"][ch]
+                    if self._noise_metrics is not None
+                    else np.nan
+                ),
+            }
+            row.update(metrics.get(ch, {}))
+            rows.append(row)
+        return pd.DataFrame(rows)
+
+    def print_channel_report(self) -> None:
+        """Print why each channel was discarded (and how many were kept)."""
+        reasons = self.exclusion_reasons
+        n_excluded = len(self.excluded_channels)
+        print(
+            f"{self.num_channels - n_excluded}/{self.num_channels} channels kept, "
+            f"{n_excluded} discarded"
+        )
+        for ch, why in reasons.items():
+            print(f"  ch {ch:>3}: {'; '.join(why)}")
 
     # ------------------------------------------------------------------
     # Spike detection
